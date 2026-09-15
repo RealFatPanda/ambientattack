@@ -28,46 +28,54 @@
 </head>
 <body>
 
-  <h1>[Anonymous Title] Audio / Visual Demo Showcase</h1>
-  <div class="subtitle">Supplementary Material for Peer Review (Double-Blind Evaluation)</div>
+  <h1>AmbientAttack: Black-Box Attacks on Automatic Speech Recognition via Acoustic Injection</h1>
+  <div class="subtitle">This paper has been submitted to ICASSP 207 for peer reviewing.</div>
 
-  <!-- 摘要 / 核心介绍 -->
   <div class="card">
-    <h2>1. Overview</h2>
-    <p>This page provides interactive demonstrations and comparison samples across different baselines and our proposed approach. All media samples are uncompressed and correspond to the evaluation section in the paper.</p>
-  </div>
+    <h2>Over-the-air Attack</h2>
+<table>
+  <thead>
+    <tr>
+      <th rowspan="2">ID</th>
+      <th rowspan="2">Speech</th>
+      <th colspan="2">45°</th>
+      <th colspan="2">90°</th>
+      <th colspan="2">180°</th>
+    </tr>
+    <tr>
+      <th>40cm</th>
+      <th>80cm</th>
+      <th>40cm</th>
+      <th>80cm</th>
+      <th>40cm</th>
+      <th>80cm</th>
+    </tr>
+  </thead>
 
-  <!-- 对比展示区（以音频对比表格为例） -->
-  <div class="card">
-    <h2>2. Qualitative Comparison</h2>
-    <table>
-      <thead>
-        <tr>
-          <th>Sample ID</th>
-          <th>Original / Ground Truth</th>
-          <th>Baseline A</th>
-          <th>Baseline B</th>
-          <th>Proposed Method</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td><strong>Sample 01</strong></td>
-          <td><audio controls src="assets/audio/sample1_gt.wav"></audio></td>
-          <td><audio controls src="assets/audio/sample1_baseA.wav"></audio></td>
-          <td><audio controls src="assets/audio/sample1_baseB.wav"></audio></td>
-          <td><audio controls src="assets/audio/sample1_ours.wav"></audio></td>
-        </tr>
-        <tr>
-          <td><strong>Sample 02</strong></td>
-          <td><audio controls src="assets/audio/sample2_gt.wav"></audio></td>
-          <td><audio controls src="assets/audio/sample2_baseA.wav"></audio></td>
-          <td><audio controls src="assets/audio/sample2_baseB.wav"></audio></td>
-          <td><audio controls src="assets/audio/sample2_ours.wav"></audio></td>
-        </tr>
-      </tbody>
-    </table>
-    <div class="note">* Note: For best listening/viewing experience, please use headphones and modern web browsers.</div>
+  <tbody>
+    <tr>
+      <td><strong>01</strong></td>
+      <td><audio controls src="assets/audio/sample1_gt.wav"></audio></td>
+      <td><audio controls src="assets/audio/sample1_45_40cm.wav"></audio></td>
+      <td><audio controls src="assets/audio/sample1_45_80cm.wav"></audio></td>
+      <td><audio controls src="assets/audio/sample1_90_40cm.wav"></audio></td>
+      <td><audio controls src="assets/audio/sample1_90_80cm.wav"></audio></td>
+      <td><audio controls src="assets/audio/sample1_180_40cm.wav"></audio></td>
+      <td><audio controls src="assets/audio/sample1_180_80cm.wav"></audio></td>
+    </tr>
+
+    <tr>
+      <td><strong>02</strong></td>
+      <td><audio controls src="assets/audio/sample2_gt.wav"></audio></td>
+      <td><audio controls src="assets/audio/sample2_45_40cm.wav"></audio></td>
+      <td><audio controls src="assets/audio/sample2_45_80cm.wav"></audio></td>
+      <td><audio controls src="assets/audio/sample2_90_40cm.wav"></audio></td>
+      <td><audio controls src="assets/audio/sample2_90_80cm.wav"></audio></td>
+      <td><audio controls src="assets/audio/sample2_180_40cm.wav"></audio></td>
+      <td><audio controls src="assets/audio/sample2_180_80cm.wav"></audio></td>
+    </tr>
+  </tbody>
+</table>
   </div>
 
 </body>
