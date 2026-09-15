@@ -4,28 +4,62 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Anonymous Paper Demo - Submission ID #XXXX</title>
+
   <style>
+    * { box-sizing: border-box; }
+
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       line-height: 1.6;
-      max-width: 900px;
+      max-width: 1450px;
       margin: 40px auto;
       padding: 0 20px;
       color: #333;
       background-color: #fcfcfc;
     }
+
     h1 { font-size: 24px; text-align: center; margin-bottom: 8px; color: #1a1a1a; }
     .subtitle { text-align: center; color: #666; font-size: 14px; margin-bottom: 30px; }
-    .card { background: #fff; border: 1px solid #e5e5e5; border-radius: 8px; padding: 20px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+
+    .card {
+      background: #fff;
+      border: 1px solid #e5e5e5;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 24px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+
     h2 { font-size: 18px; border-bottom: 2px solid #eaeaea; padding-bottom: 6px; margin-top: 0; }
-    table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 14px; }
+    .table-wrapper { width: 100%; overflow-x: auto; }
+
+    table {
+      width: 100%;
+      min-width: 1330px;
+      border-collapse: collapse;
+      table-layout: fixed;
+      margin-top: 15px;
+      font-size: 14px;
+    }
+
     th, td { border: 1px solid #e0e0e0; padding: 10px; text-align: center; vertical-align: middle; }
     th { background: #f8f9fa; font-weight: 600; }
-    audio { width: 100%; max-width: 220px; }
+
+    .id-column { width: 70px; }
+    .audio-column { width: 180px; }
+
+    audio { display: block; width: 100%; min-width: 160px; max-width: none; margin: 0 auto; }
     img { max-width: 100%; border-radius: 4px; }
     .note { font-size: 12px; color: #777; margin-top: 10px; }
+
+    @media (max-width: 768px) {
+      body { margin: 20px auto; padding: 0 12px; }
+      h1 { font-size: 21px; }
+      .card { padding: 14px; }
+    }
   </style>
 </head>
+
 <body>
 
   <h1>AmbientAttack: Black-Box Attacks on Automatic Speech Recognition via Acoustic Injection</h1>
@@ -33,49 +67,57 @@
 
   <div class="card">
     <h2>Over-the-air Attack</h2>
-<table>
-  <thead>
-    <tr>
-      <th rowspan="2">ID</th>
-      <th rowspan="2">Speech</th>
-      <th colspan="2">45°</th>
-      <th colspan="2">90°</th>
-      <th colspan="2">180°</th>
-    </tr>
-    <tr>
-      <th>40cm</th>
-      <th>80cm</th>
-      <th>40cm</th>
-      <th>80cm</th>
-      <th>40cm</th>
-      <th>80cm</th>
-    </tr>
-  </thead>
 
-  <tbody>
-    <tr>
-      <td><strong>01</strong></td>
-      <td><audio controls src="assets/audio/sample1_gt.wav"></audio></td>
-      <td><audio controls src="assets/audio/sample1_45_40cm.wav"></audio></td>
-      <td><audio controls src="assets/audio/sample1_45_80cm.wav"></audio></td>
-      <td><audio controls src="assets/audio/sample1_90_40cm.wav"></audio></td>
-      <td><audio controls src="assets/audio/sample1_90_80cm.wav"></audio></td>
-      <td><audio controls src="assets/audio/sample1_180_40cm.wav"></audio></td>
-      <td><audio controls src="assets/audio/sample1_180_80cm.wav"></audio></td>
-    </tr>
+    <div class="table-wrapper">
+      <table>
+        <colgroup>
+          <col class="id-column">
+          <col span="7" class="audio-column">
+        </colgroup>
 
-    <tr>
-      <td><strong>02</strong></td>
-      <td><audio controls src="assets/audio/sample2_gt.wav"></audio></td>
-      <td><audio controls src="assets/audio/sample2_45_40cm.wav"></audio></td>
-      <td><audio controls src="assets/audio/sample2_45_80cm.wav"></audio></td>
-      <td><audio controls src="assets/audio/sample2_90_40cm.wav"></audio></td>
-      <td><audio controls src="assets/audio/sample2_90_80cm.wav"></audio></td>
-      <td><audio controls src="assets/audio/sample2_180_40cm.wav"></audio></td>
-      <td><audio controls src="assets/audio/sample2_180_80cm.wav"></audio></td>
-    </tr>
-  </tbody>
-</table>
+        <thead>
+          <tr>
+            <th rowspan="2">ID</th>
+            <th rowspan="2">Speech</th>
+            <th colspan="2">45°</th>
+            <th colspan="2">90°</th>
+            <th colspan="2">180°</th>
+          </tr>
+          <tr>
+            <th>40cm</th>
+            <th>80cm</th>
+            <th>40cm</th>
+            <th>80cm</th>
+            <th>40cm</th>
+            <th>80cm</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          <tr>
+            <td><strong>01</strong></td>
+            <td><audio controls src="assets/audio/sample1_gt.wav"></audio></td>
+            <td><audio controls src="assets/audio/sample1_45_40cm.wav"></audio></td>
+            <td><audio controls src="assets/audio/sample1_45_80cm.wav"></audio></td>
+            <td><audio controls src="assets/audio/sample1_90_40cm.wav"></audio></td>
+            <td><audio controls src="assets/audio/sample1_90_80cm.wav"></audio></td>
+            <td><audio controls src="assets/audio/sample1_180_40cm.wav"></audio></td>
+            <td><audio controls src="assets/audio/sample1_180_80cm.wav"></audio></td>
+          </tr>
+
+          <tr>
+            <td><strong>02</strong></td>
+            <td><audio controls src="assets/audio/sample2_gt.wav"></audio></td>
+            <td><audio controls src="assets/audio/sample2_45_40cm.wav"></audio></td>
+            <td><audio controls src="assets/audio/sample2_45_80cm.wav"></audio></td>
+            <td><audio controls src="assets/audio/sample2_90_40cm.wav"></audio></td>
+            <td><audio controls src="assets/audio/sample2_90_80cm.wav"></audio></td>
+            <td><audio controls src="assets/audio/sample2_180_40cm.wav"></audio></td>
+            <td><audio controls src="assets/audio/sample2_180_80cm.wav"></audio></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 
 </body>
