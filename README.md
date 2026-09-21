@@ -10,6 +10,7 @@ Our demo website [[demo]](https://anonymous.4open.science/r/ambientattack-469F/i
 ```
 conda create -n ambientattack python=3.9.21
 conda activate ambientattack
+pip install pip==24.0
 pip install -r requirements.txt
 pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 --index-url https://download.pytorch.org/whl/cu121
 ```
