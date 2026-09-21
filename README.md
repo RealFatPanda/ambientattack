@@ -2,6 +2,8 @@
 
 This paper has been submitted to ICASSP 2027 for peer reviewing. <br>
 
+You can use the Wav2Vec2.0 for example testing.
+
 Our demo website [[demo]](https://anonymous.4open.science/r/ambientattack-469F/index.html)
 
 # How to Use
@@ -9,11 +11,12 @@ Our demo website [[demo]](https://anonymous.4open.science/r/ambientattack-469F/i
 conda create -n ambientattack python=3.9.21
 conda activate ambientattack
 pip install -r requirements.txt
+pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 --index-url https://download.pytorch.org/whl/cu121
 ```
 
 ## Download Wav2Vec2.0
 - Please clone this website https://github.com/facebookresearch/fairseq/tree/main/examples/wav2vec
-- Download the checkpoint Wav2Vec 2.0 Base
+- Download the checkpoint Wav2Vec 2.0 Base 960 hours
 - dict.ltr.txt file: https://dl.fbaipublicfiles.com/fairseq/wav2vec/dict.ltr.txt
 
 ## Download NISQA
