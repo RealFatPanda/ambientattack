@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Wav2Vec-only stage-1 environment screening for one speech sample.
+"""Standalone Wav2Vec stage-1 environment screening for one speech sample.
 
 The script fixes one speech sample and one hard-text ASR model, samples 50
 environment sounds without replacement, and evaluates neutral environment
@@ -13,9 +13,9 @@ below the fallback threshold are reported but are never selected.
 
 Examples:
 
-    python ambientattack_first_step_wav2vec.py --speech sample.wav
-    python ambientattack_first_step_wav2vec.py --sample-count 2 --top-k 1 \
-        --snr-min 0 --snr-max 10 --force-cpu
+    python ambientattack_first_step_wav2vec.py \
+        --speech sample.wav --environment-pool environments \
+        --wav2vec-model wav2vec.pt --wav2vec-dictionary dict.ltr.txt
 """
 
 from __future__ import annotations
@@ -23,21 +23,22 @@ from __future__ import annotations
 import argparse
 import csv
 import gc
+import itertools
 import json
 import math
+import re
 import secrets
 import shutil
+import unicodedata
 from dataclasses import dataclass
+from math import gcd
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
+import soundfile as sf
 from jiwer import cer, wer
-
-if __package__:
-    from . import asr_attack_test as attack_core
-else:
-    import asr_attack_test as attack_core
+from scipy.signal import resample_poly
 
 
 DEFAULT_OUTPUT_DIR = Path("ambientattack_first_step_test_results")
@@ -50,6 +51,26 @@ DEFAULT_SNR_GRID_STEP_DB = 5.0
 DEFAULT_SNR_TOLERANCE_DB = 0.25
 ENVIRONMENT_EXTENSIONS = {".wav", ".flac", ".ogg"}
 TARGET_ASR = "wav2vec"
+TARGET_SAMPLE_RATE = 16000
+WAV2VEC_CHUNK_SECONDS = 20.0
+WAV2VEC_STRIDE_SECONDS = 4.0
+ENVIRONMENT_LOOP_CROSSFADE_MS = 40.0
+
+EXPLICIT_NUMBER_RULES = (
+    (r"\b0?7\s*[:.]\s*15\b", "seven fifteen"),
+    (r"\b715\b", "seven fifteen"),
+    (r"\b0?3\s*[:.]\s*30\b", "three thirty"),
+    (r"\b330\b", "three thirty"),
+    (r"\b50\s*%", "fifty percent"),
+    (r"\b125\b", "one hundred twenty five"),
+    (r"\b68\b", "sixty eight"),
+    (r"\b50\b", "fifty"),
+    (r"\b30\b", "thirty"),
+    (r"\b15\b", "fifteen"),
+    (r"\b7\b", "seven"),
+    (r"\b3\b", "three"),
+    (r"\b2\b", "two"),
+)
 
 RESULT_FIELDS = (
     "random_order",
@@ -131,6 +152,283 @@ class ScreeningResult:
             -self.max_observed_cer,
             str(self.environment_path),
         )
+
+
+class Wav2VecASR:
+    """Load a fairseq Wav2Vec 2.0 CTC checkpoint and return hard text."""
+
+    def __init__(
+        self,
+        model_path: Path,
+        dictionary_path: Path,
+        chunk_seconds: float = WAV2VEC_CHUNK_SECONDS,
+        stride_seconds: float = WAV2VEC_STRIDE_SECONDS,
+        force_cpu: bool = False,
+        input_sample_rate: int = TARGET_SAMPLE_RATE,
+    ) -> None:
+        import torch
+        from fairseq import checkpoint_utils
+
+        model_path = model_path.expanduser().resolve()
+        dictionary_path = dictionary_path.expanduser().resolve()
+        if not model_path.is_file():
+            raise FileNotFoundError(f"Fairseq checkpoint not found: {model_path}")
+        if not dictionary_path.is_file():
+            raise FileNotFoundError(
+                f"Fairseq letter dictionary not found: {dictionary_path}"
+            )
+        if dictionary_path.name != "dict.ltr.txt":
+            raise ValueError("The fairseq dictionary must be named dict.ltr.txt")
+        if chunk_seconds < 0.0 or stride_seconds < 0.0:
+            raise ValueError("Wav2Vec chunk and stride must be non-negative")
+        if chunk_seconds > 0.0 and 2.0 * stride_seconds >= chunk_seconds:
+            raise ValueError(
+                "stride_seconds must be less than half of chunk_seconds"
+            )
+
+        self.torch = torch
+        self.device = torch.device(
+            "cpu"
+            if force_cpu
+            else ("cuda:0" if torch.cuda.is_available() else "cpu")
+        )
+        self.input_sample_rate = int(input_sample_rate)
+        self.chunk_seconds = float(chunk_seconds)
+        self.stride_seconds = float(stride_seconds)
+
+        print(f"[wav2vec] Loading {model_path} on {self.device}")
+        overrides = {
+            "task": "audio_finetuning",
+            "data": str(dictionary_path.parent),
+            "labels": "ltr",
+        }
+        models, cfg, task = checkpoint_utils.load_model_ensemble_and_task(
+            [str(model_path)],
+            arg_overrides=overrides,
+        )
+        self.model = models[0].eval().to(self.device)
+        self.dictionary = task.target_dictionary
+        self.blank = self.dictionary.bos()
+        self.sample_rate = int(cfg.task.sample_rate)
+        print(f"[wav2vec] Sample rate: {self.sample_rate} Hz")
+
+    def _resample(self, audio: np.ndarray) -> np.ndarray:
+        if self.input_sample_rate == self.sample_rate:
+            return audio
+        from torchaudio.functional import resample
+
+        waveform = self.torch.from_numpy(audio)
+        return resample(
+            waveform,
+            self.input_sample_rate,
+            self.sample_rate,
+        ).numpy()
+
+    def _decode_chunk(self, audio: np.ndarray) -> List[Tuple[str, float, float]]:
+        source = self.torch.from_numpy(audio).to(self.device).unsqueeze(0)
+        with self.torch.inference_mode():
+            encoder_out = self.model(source=source, padding_mask=None)
+            logits = self.model.get_logits(encoder_out)[:, 0]
+        token_ids = logits.argmax(dim=-1).cpu().tolist()
+
+        runs: List[Tuple[int, int, int]] = []
+        start = 0
+        for token, group in itertools.groupby(token_ids):
+            length = sum(1 for _ in group)
+            end = start + length
+            if token != self.blank:
+                runs.append((token, start, end))
+            start = end
+
+        seconds_per_frame = (
+            len(audio) / self.sample_rate / max(len(token_ids), 1)
+        )
+        words: List[Tuple[str, float, float]] = []
+        letters: List[str] = []
+        word_start: Optional[float] = None
+        word_end = 0.0
+        for token, frame_start, frame_end in runs:
+            symbol = self.dictionary[token]
+            if symbol == "|":
+                if letters:
+                    words.append(
+                        ("".join(letters), word_start or 0.0, word_end)
+                    )
+                    letters = []
+                    word_start = None
+                continue
+            if symbol.startswith("<"):
+                continue
+            if word_start is None:
+                word_start = frame_start * seconds_per_frame
+            word_end = frame_end * seconds_per_frame
+            letters.append(symbol)
+        if letters:
+            words.append(("".join(letters), word_start or 0.0, word_end))
+        return words
+
+    def transcribe(self, audio: np.ndarray) -> str:
+        """Return a greedy CTC transcript for a mono floating waveform."""
+        audio = self._resample(np.asarray(audio, dtype=np.float32))
+        duration = len(audio) / self.sample_rate
+        if self.chunk_seconds <= 0.0 or duration <= self.chunk_seconds:
+            words = self._decode_chunk(audio)
+            return " ".join(word for word, _, _ in words).strip()
+
+        chunk_samples = round(self.chunk_seconds * self.sample_rate)
+        stride_samples = round(self.stride_seconds * self.sample_rate)
+        step_samples = chunk_samples - 2 * stride_samples
+        selected_words: List[str] = []
+        chunk_start = 0
+        while chunk_start < len(audio):
+            chunk_end = min(chunk_start + chunk_samples, len(audio))
+            words = self._decode_chunk(audio[chunk_start:chunk_end])
+            left = 0.0 if chunk_start == 0 else self.stride_seconds
+            chunk_duration = (chunk_end - chunk_start) / self.sample_rate
+            right = (
+                chunk_duration
+                if chunk_end == len(audio)
+                else chunk_duration - self.stride_seconds
+            )
+            for word, start_time, end_time in words:
+                midpoint = 0.5 * (start_time + end_time)
+                if left <= midpoint < right or (
+                    chunk_end == len(audio) and midpoint <= right
+                ):
+                    selected_words.append(word)
+            if chunk_end == len(audio):
+                break
+            chunk_start += step_samples
+        return " ".join(selected_words).strip()
+
+    def close(self) -> None:
+        """Release model memory."""
+        if self.model is not None:
+            model = self.model
+            self.model = None
+            del model
+        gc.collect()
+        if self.torch.cuda.is_available():
+            self.torch.cuda.empty_cache()
+
+
+def build_asr(args: argparse.Namespace) -> Wav2VecASR:
+    return Wav2VecASR(
+        model_path=args.wav2vec_model,
+        dictionary_path=args.wav2vec_dictionary,
+        chunk_seconds=args.wav2vec_chunk_seconds,
+        stride_seconds=args.wav2vec_stride_seconds,
+        force_cpu=args.force_cpu,
+        input_sample_rate=TARGET_SAMPLE_RATE,
+    )
+
+
+def expand_explicit_numbers(text: str) -> str:
+    """Spell numeric forms according to the fixed test prompts."""
+    for pattern, replacement in EXPLICIT_NUMBER_RULES:
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    return text
+
+
+def normalize_text(text: str) -> str:
+    """Apply identical number and text normalization to all ASR text."""
+    text = unicodedata.normalize("NFKD", str(text)).lower()
+    text = text.replace("’", "'")
+    text = expand_explicit_numbers(text)
+    text = re.sub(r"[^a-z0-9'\s]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def load_audio(path: Path, target_sr: int = TARGET_SAMPLE_RATE) -> np.ndarray:
+    audio, sample_rate = sf.read(str(path), dtype="float32", always_2d=False)
+    if audio.ndim == 2:
+        audio = audio.mean(axis=1, dtype=np.float32)
+    elif audio.ndim != 1:
+        raise ValueError(f"Unsupported audio shape for {path}: {audio.shape}")
+    if audio.size == 0:
+        raise ValueError(f"Empty audio file: {path}")
+    if sample_rate != target_sr:
+        divisor = gcd(int(sample_rate), int(target_sr))
+        audio = resample_poly(
+            audio,
+            target_sr // divisor,
+            int(sample_rate) // divisor,
+        ).astype(np.float32)
+    if not np.all(np.isfinite(audio)):
+        raise ValueError(f"Audio contains NaN or Inf: {path}")
+    return np.asarray(np.clip(audio, -1.0, 1.0), dtype=np.float32)
+
+
+def rms(audio: np.ndarray, eps: float = 1e-12) -> float:
+    return float(np.sqrt(np.mean(np.square(audio, dtype=np.float64)) + eps))
+
+
+def calculate_snr_db(
+    speech_component: np.ndarray,
+    environment_component: np.ndarray,
+) -> float:
+    speech_power = float(np.mean(np.square(speech_component, dtype=np.float64)))
+    environment_power = float(
+        np.mean(np.square(environment_component, dtype=np.float64))
+    )
+    return 10.0 * math.log10(
+        max(speech_power, 1e-20) / max(environment_power, 1e-20)
+    )
+
+
+def fit_to_length_with_sample_offset(
+    audio: np.ndarray,
+    target_length: int,
+    offset_samples: int,
+) -> np.ndarray:
+    if audio.size == 0:
+        raise ValueError("Cannot align an empty environment waveform")
+    offset = int(offset_samples) % audio.size
+    indices = (offset + np.arange(target_length, dtype=np.int64)) % audio.size
+    return np.asarray(audio[indices], dtype=np.float32)
+
+
+def make_crossfaded_environment_loop(audio: np.ndarray) -> np.ndarray:
+    """Create a periodic environment loop with a smooth end/start join."""
+    if audio.size < 4:
+        return np.asarray(audio, dtype=np.float32).copy()
+
+    requested_samples = int(
+        round(ENVIRONMENT_LOOP_CROSSFADE_MS * TARGET_SAMPLE_RATE / 1000.0)
+    )
+    crossfade_samples = min(
+        max(1, requested_samples),
+        max(1, audio.size // 4),
+    )
+    search_start = max(1, crossfade_samples // 2)
+    search_stop = min(
+        max(search_start + 1, audio.size // 4),
+        crossfade_samples + max(2, crossfade_samples // 2),
+    )
+    candidate_offsets = np.arange(search_start, search_stop, dtype=np.int64)
+    boundary_changes = np.abs(
+        np.asarray(audio[candidate_offsets], dtype=np.float64)
+        - np.asarray(audio[candidate_offsets - 1], dtype=np.float64)
+    )
+    crossfade_samples = int(
+        candidate_offsets[int(np.argmin(boundary_changes))]
+    )
+
+    phase = (
+        np.arange(1, crossfade_samples + 1, dtype=np.float64)
+        / (crossfade_samples + 1)
+    )
+    fade_in = 0.5 - 0.5 * np.cos(np.pi * phase)
+    overlap = (
+        np.asarray(audio[-crossfade_samples:], dtype=np.float64)
+        * (1.0 - fade_in)
+        + np.asarray(audio[:crossfade_samples], dtype=np.float64) * fade_in
+    )
+    middle = np.asarray(
+        audio[crossfade_samples:-crossfade_samples],
+        dtype=np.float64,
+    )
+    return np.asarray(np.concatenate((middle, overlap)), dtype=np.float32)
 
 
 def parse_args() -> argparse.Namespace:
@@ -233,12 +531,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--wav2vec-chunk-seconds",
         type=float,
-        default=attack_core.WAV2VEC_CHUNK_SECONDS,
+        default=WAV2VEC_CHUNK_SECONDS,
     )
     parser.add_argument(
         "--wav2vec-stride-seconds",
         type=float,
-        default=attack_core.WAV2VEC_STRIDE_SECONDS,
+        default=WAV2VEC_STRIDE_SECONDS,
     )
     args = parser.parse_args()
     return args
@@ -332,16 +630,16 @@ class SNRSearch:
         clean_text_raw: str,
     ) -> None:
         self.speech = np.asarray(speech, dtype=np.float32)
-        loop = attack_core.make_crossfaded_environment_loop(environment)
-        self.environment = attack_core.fit_to_length_with_sample_offset(
+        loop = make_crossfaded_environment_loop(environment)
+        self.environment = fit_to_length_with_sample_offset(
             loop,
             self.speech.size,
             0,
         )
-        if attack_core.rms(self.environment) <= 1e-8:
+        if rms(self.environment) <= 1e-8:
             raise ValueError("Environment sound is silent after length matching")
         self.asr = asr
-        self.clean_text_normalized = attack_core.normalize_text(clean_text_raw)
+        self.clean_text_normalized = normalize_text(clean_text_raw)
         self.query_count = 0
         self.cache: Dict[float, SNREvaluation] = {}
 
@@ -350,8 +648,8 @@ class SNRSearch:
         cached = self.cache.get(key)
         if cached is not None:
             return cached
-        environment_scale = attack_core.rms(self.speech) / (
-            attack_core.rms(self.environment)
+        environment_scale = rms(self.speech) / (
+            rms(self.environment)
             * float(10.0 ** (key / 20.0))
         )
         environment_component = self.environment * environment_scale
@@ -360,7 +658,7 @@ class SNRSearch:
             dtype=np.float32,
         )
         transcript_raw = self.asr.transcribe(mixture)
-        transcript_normalized = attack_core.normalize_text(transcript_raw)
+        transcript_normalized = normalize_text(transcript_raw)
         self.query_count += 1
         evaluation = SNREvaluation(
             query=self.query_count,
@@ -375,7 +673,7 @@ class SNRSearch:
                 wer(self.clean_text_normalized, transcript_normalized)
             ),
             actual_snr_db=float(
-                attack_core.calculate_snr_db(
+                calculate_snr_db(
                     self.speech,
                     environment_component,
                 )
@@ -459,7 +757,7 @@ def screen_environment(
 ) -> ScreeningResult:
     attack: Optional[SNRSearch] = None
     try:
-        environment = attack_core.load_audio(environment_path)
+        environment = load_audio(environment_path)
         attack = SNRSearch(
             speech,
             environment,
@@ -599,7 +897,7 @@ def main() -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     progress_path = run_dir / "screening_progress.csv"
 
-    speech = attack_core.load_audio(args.speech)
+    speech = load_audio(args.speech)
 
     print("=" * 88)
     print(f"Speech             : {args.speech}")
@@ -619,9 +917,9 @@ def main() -> None:
     results: List[ScreeningResult] = []
     total_queries = 0
     try:
-        asr = attack_core.build_asr(args)
+        asr = build_asr(args)
         clean_text_raw = asr.transcribe(speech)
-        clean_text_normalized = attack_core.normalize_text(clean_text_raw)
+        clean_text_normalized = normalize_text(clean_text_raw)
         if not clean_text_normalized:
             raise RuntimeError("ASR returned an empty clean transcript")
         total_queries = 1
