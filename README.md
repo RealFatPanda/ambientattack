@@ -51,3 +51,5 @@ python ambientattack_second_step_wav2vec.py \
   --nisqa-root ../NISQA \
   --nisqa-model ../NISQA/weights/nisqa_mos_only.tar
 ```
+
+You can listen to optimized audio samples from the second step optimization in the folder "results_samples"
